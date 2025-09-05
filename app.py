@@ -7,7 +7,7 @@ from io import BytesIO
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-here')
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Global variables
 DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
