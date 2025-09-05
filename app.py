@@ -3,7 +3,6 @@ from flask_socketio import SocketIO, emit
 import os, re, praw, time, threading
 from elevenlabs import generate, set_api_key
 import base64
-from io import BytesIO
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-here')
@@ -12,7 +11,6 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 # Global variables
 DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
 reddit = None
-tts = None
 current_submission = None
 seen_comments = set()
 is_streaming = False
@@ -20,10 +18,6 @@ comment_thread = None
 current_settings = {
     'reddit_url': '',
     'voice_id': 'od84OdVweqzO3t6kKlWT',
-    'stability': 0.71,
-    'similarity_boost': 0.5,
-    'style': 0.0,
-    'use_speaker_boost': True
 }
 
 def debug_print(message):
@@ -43,17 +37,16 @@ def initialize_reddit():
             user_agent="tts-streamer/1.0 by DirtPuzzleheaded5521",
         )
         
-        debug_print(f"Reddit initialized successfully")
+        debug_print("Reddit initialized successfully")
         return True
     except Exception as e:
         debug_print(f"ERROR connecting to Reddit API: {e}")
         return False
 
 def initialize_elevenlabs():
-    global tts
     try:
         eleven_api_key = os.environ.get('ELEVENLABS_API_KEY', 'sk_328ed0b28661215a7331caa5029cfd0201a057920c654560')
-        tts = ElevenLabs(api_key=eleven_api_key)
+        set_api_key(eleven_api_key)
         debug_print("ElevenLabs initialized successfully")
         return True
     except Exception as e:
@@ -66,7 +59,7 @@ def clean_text(markdown: str) -> str:
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
 
-def speak_text(text: str, voice_id: str) -> bytes:
+def speak_text(text: str, voice_id: str):
     if not text.strip() or len(text.strip()) < 3:
         return None
     
@@ -77,8 +70,7 @@ def speak_text(text: str, voice_id: str) -> bytes:
         
         debug_print(f"Converting text to speech: {cleaned_text[:50]}...")
         
-        # Use the simpler generate method
-        audio = tts.generate(
+        audio = generate(
             text=cleaned_text,
             voice=voice_id,
             model="eleven_monolingual_v1"
@@ -154,7 +146,7 @@ def index():
 
 @app.route('/health')
 def health_check():
-    return jsonify({'status': 'healthy', 'reddit': reddit is not None, 'elevenlabs': True})
+    return jsonify({'status': 'healthy', 'reddit': reddit is not None})
 
 @app.route('/api/start_stream', methods=['POST'])
 def start_stream():
