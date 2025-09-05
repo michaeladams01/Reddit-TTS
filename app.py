@@ -154,7 +154,7 @@ def index():
 
 @app.route('/health')
 def health_check():
-    return jsonify({'status': 'healthy', 'reddit': reddit is not None, 'tts': tts is not None})
+    return jsonify({'status': 'healthy', 'reddit': reddit is not None, 'elevenlabs': True})
 
 @app.route('/api/start_stream', methods=['POST'])
 def start_stream():
