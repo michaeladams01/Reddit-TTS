@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_socketio import SocketIO, emit
 import os, re, praw, time, threading
-from elevenlabs import generate, sk_328ed0b28661215a7331caa5029cfd0201a057920c654560
+from elevenlabs import generate, set_api_key
 import base64
 from io import BytesIO
 
