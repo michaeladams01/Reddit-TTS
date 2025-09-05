@@ -248,4 +248,5 @@ if __name__ == '__main__':
     print("✅ All APIs initialized successfully")
     print("🎧 Starting web server...")
     
-    socketio.run(app, debug=DEBUG, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    port = int(os.environ.get('PORT', 5000))
+    socketio.run(app, debug=DEBUG, host='0.0.0.0', port=port)
