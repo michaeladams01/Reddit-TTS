@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reddit TTS Stream</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1e293b 0%, #7c3aed 50%, #1e293b 100%);
+            min-height: 100vh;
+            color: white;
+        }
+        .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+        .header { text-align: center; margin-bottom: 3rem; }
+        .header h1 { font-size: 2.5rem; margin-bottom: 0.5rem; }
+        .header p { color: #cbd5e1; }
+        .card { 
+            background: rgba(30, 41, 59, 0.8); 
+            border-radius: 1rem; 
+            padding: 2rem; 
+            margin-bottom: 2rem;
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            backdrop-filter: blur(10px);
+        }
+        .form-group { margin-bottom: 1.5rem; }
+        .form-group label { display: block; margin-bottom: 0.5rem; font-weight: 500; }
+        .form-group input, .form-group select { 
+            width: 100%; 
+            padding: 0.75rem; 
+            border: 1px solid #475569; 
+            border-radius: 0.5rem; 
+            background: #334155; 
+            color: white;
+            font-size: 1rem;
+        }
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: #7c3aed;
+            box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.2);
+        }
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 0.5rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-right: 0.5rem;
+        }
+        .btn-primary { background: #7c3aed; color: white; }
+        .btn-primary:hover { background: #6d28d9; }
+        .btn-secondary { background: #475569; color: white; }
+        .btn-secondary:hover { background: #64748b; }
+        .btn-danger { background: #dc2626; color: white; }
+        .btn-danger:hover { background: #b91c1c; }
+        .status { 
+            padding: 1rem; 
+            border-radius: 0.5rem; 
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .status.connected { background: rgba(34, 197, 94, 0.2); border: 1px solid #22c55e; }
+        .status.streaming { background: rgba(124, 58, 237, 0.2); border: 1px solid #7c3aed; }
+        .status.error { background: rgba(220, 38, 38, 0.2); border: 1px solid #dc2626; }
+        .pulse { animation: pulse 1s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .comments { max-height: 400px; overflow-y: auto; }
+        .comment { 
+            padding: 1rem; 
+            border-bottom: 1px solid #475569; 
+            transition: background 0.2s;
+        }
+        .comment:hover { background: rgba(124, 58, 237, 0.1); }
+        .comment-author { color: #7c3aed; font-weight: 500; margin-bottom: 0.5rem; }
+        .comment-body { color: #cbd5e1; line-height: 1.5; }
+        .comment-time { color: #64748b; font-size: 0.875rem; }
+        .playing { background: rgba(124, 58, 237, 0.2) !important; border-left: 4px solid #7c3aed; }
+        .settings { display: none; }
+        .settings.show { display: block; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎧 Reddit TTS Stream</h1>
+            <p>Live text-to-speech for Reddit comments</p>
+        </div>
+
+        <div id="status" class="status connected">
+            <span class="pulse">●</span>
+            <span id="status-text">Ready to start</span>
+        </div>
+
+        <div class="card">
+            <h2>Stream Controls</h2>
+            <div class="form-group">
+                <label for="reddit-url">Reddit Post URL</label>
+                <input type="url" id="reddit-url" placeholder="https://reddit.com/r/wallstreetbets/comments/..." 
+                       value="https://www.reddit.com/r/wallstreetbets/comments/1lm3h5d/weekend_discussion_thread_for_the_weekend_of_june/">
+            </div>
+            
+            <div>
+                <button id="start-btn" class="btn btn-primary">Start Streaming</button>
+                <button id="stop-btn" class="btn btn-danger" disabled>Stop Streaming</button>
+                <button id="test-btn" class="btn btn-secondary">Test Audio</button>
+                <button id="settings-btn" class="btn btn-secondary">Settings</button>
+            </div>
+
+            <div id="settings" class="settings">
+                <h3 style="margin: 2rem 0 1rem 0;">Settings</h3>
+                <div class="grid">
+                    <div class="form-group">
+                        <label for="voice-id">Voice ID</label>
+                        <input type="text" id="voice-id" value="od84OdVweqzO3t6kKlWT">
+                    </div>
+                    <div class="form-group">
+                        <label for="stability">Stability</label>
+                        <input type="range" id="stability" min="0" max="1" step="0.01" value="0.71">
+                    </div>
+                    <div class="form-group">
+                        <label for="similarity">Similarity Boost</label>
+                        <input type="range" id="similarity" min="0" max="1" step="0.01" value="0.5">
+                    </div>
+                    <div class="form-group">
+                        <label for="style">Style</label>
+                        <input type="range" id="style" min="0" max="1" step="0.01" value="0.0">
+                    </div>
+                </div>
+                <button id="save-settings" class="btn btn-primary">Save Settings</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Recent Comments (<span id="comment-count">0</span>)</h2>
+            <div id="comments" class="comments">
+                <p style="text-align: center; color: #64748b; padding: 2rem;">
+                    No comments yet. Start streaming to see them here!
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let isStreaming = false;
+        let commentCount = 0;
+        let currentAudio = null;
+
+        // DOM elements
+        const statusEl = document.getElementById('status');
+        const statusTextEl = document.getElementById('status-text');
+        const startBtn = document.getElementById('start-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const testBtn = document.getElementById('test-btn');
+        const settingsBtn = document.getElementById('settings-btn');
+        const settingsEl = document.getElementById('settings');
+        const saveSettingsBtn = document.getElementById('save-settings');
+        const commentsEl = document.getElementById('comments');
+        const commentCountEl = document.getElementById('comment-count');
+
+        // Socket events
+        socket.on('status', (data) => {
+            updateStatus(data.message, 'connected');
+        });
+
+        socket.on('debug', (data) => {
+            console.log('[DEBUG]', data.message);
+        });
+
+        socket.on('error', (data) => {
+            updateStatus(data.message, 'error');
+        });
+
+        socket.on('new_comment', (comment) => {
+            addComment(comment);
+        });
+
+        socket.on('play_audio', (data) => {
+            playAudio(data);
+        });
+
+        // Functions
+        function updateStatus(message, type = 'connected') {
+            statusTextEl.textContent = message;
+            statusEl.className = `status ${type}`;
+        }
+
+        function addComment(comment) {
+            commentCount++;
+            commentCountEl.textContent = commentCount;
+
+            const commentEl = document.createElement('div');
+            commentEl.className = 'comment';
+            commentEl.id = `comment-${comment.id}`;
+            commentEl.innerHTML = `
+                <div class="comment-author">u/${comment.author}</div>
+                <div class="comment-body">${comment.body}</div>
+                <div class="comment-time">${new Date(comment.timestamp * 1000).toLocaleTimeString()}</div>
+            `;
+
+            if (commentsEl.innerHTML.includes('No comments yet')) {
+                commentsEl.innerHTML = '';
+            }
+
+            commentsEl.insertBefore(commentEl, commentsEl.firstChild);
+        }
+
+        function playAudio(data) {
+            // Stop current audio
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio = null;
+            }
+
+            // Remove previous playing indicator
+            const prevPlaying = document.querySelector('.playing');
+            if (prevPlaying) {
+                prevPlaying.classList.remove('playing');
+            }
+
+            // Highlight current comment
+            const commentEl = document.getElementById(`comment-${data.comment_id}`);
+            if (commentEl) {
+                commentEl.classList.add('playing');
+            }
+
+            // Play audio
+            try {
+                const audioData = `data:audio/mp3;base64,${data.audio}`;
+                currentAudio = new Audio(audioData);
+                currentAudio.play();
+                
+                updateStatus(`Speaking: ${data.text}`, 'streaming');
+
+                currentAudio.onended = () => {
+                    if (commentEl) {
+                        commentEl.classList.remove('playing');
+                    }
+                    updateStatus('Listening for comments...', 'streaming');
+                };
+            } catch (error) {
+                console.error('Error playing audio:', error);
+            }
+        }
+
+        // Event listeners
+        startBtn.addEventListener('click', async () => {
+            const url = document.getElementById('reddit-url').value;
+            if (!url) {
+                alert('Please enter a Reddit URL');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/start_stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        reddit_url: url,
+                        voice_id: document.getElementById('voice-id').value,
+                        stability: parseFloat(document.getElementById('stability').value),
+                        similarity_boost: parseFloat(document.getElementById('similarity').value),
+                        style: parseFloat(document.getElementById('style').value),
+                        use_speaker_boost: true
+                    })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    isStreaming = true;
+                    startBtn.disabled = true;
+                    stopBtn.disabled = false;
+                    updateStatus(`Streaming: ${data.title}`, 'streaming');
+                    commentsEl.innerHTML = '';
+                    commentCount = 0;
+                    commentCountEl.textContent = '0';
+                } else {
+                    alert(data.error);
+                }
+            } catch (error) {
+                alert('Failed to start stream: ' + error.message);
+            }
+        });
+
+        stopBtn.addEventListener('click', async () => {
+            try {
+                await fetch('/api/stop_stream', { method: 'POST' });
+                isStreaming = false;
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+                updateStatus('Stopped streaming', 'connected');
+                
+                if (currentAudio) {
+                    currentAudio.pause();
+                    currentAudio = null;
+                }
+            } catch (error) {
+                alert('Failed to stop stream: ' + error.message);
+            }
+        });
+
+        testBtn.addEventListener('click', async () => {
+            try {
+                const response = await fetch('/api/test_audio', { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.success) {
+                    const audio = new Audio(`data:audio/mp3;base64,${data.audio}`);
+                    audio.play();
+                    updateStatus('Playing test audio...', 'streaming');
+                } else {
+                    alert(data.error);
+                }
+            } catch (error) {
+                alert('Audio test failed: ' + error.message);
+            }
+        });
+
+        settingsBtn.addEventListener('click', () => {
+            settingsEl.classList.toggle('show');
+        });
+
+        saveSettingsBtn.addEventListener('click', async () => {
+            const settings = {
+                voice_id: document.getElementById('voice-id').value,
+                stability: parseFloat(document.getElementById('stability').value),
+                similarity_boost: parseFloat(document.getElementById('similarity').value),
+                style: parseFloat(document.getElementById('style').value),
+                use_speaker_boost: true
+            };
+
+            try {
+                await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(settings)
+                });
+                alert('Settings saved!');
+            } catch (error) {
+                alert('Failed to save settings: ' + error.message);
+            }
+        });
+    </script>
+</body>
+</html>
