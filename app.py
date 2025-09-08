@@ -28,39 +28,62 @@ def debug_print(message):
 def initialize_reddit():
     global reddit
     try:
-        client_id = os.environ.get('REDDIT_CLIENT_ID', 'ZWbGdR3jT0TjpRPIlKWMAA')
-        client_secret = os.environ.get('REDDIT_CLIENT_SECRET', 'MjoRxAeGZfOV9FaHht9i2hu5iFYcjg')
+        # Get credentials from environment variables
+        client_id = os.environ.get('REDDIT_CLIENT_ID')
+        client_secret = os.environ.get('REDDIT_CLIENT_SECRET')
+        
+        # Check if credentials are provided
+        if not client_id:
+            debug_print("ERROR: REDDIT_CLIENT_ID environment variable not set")
+            return False
+            
+        if not client_secret:
+            debug_print("ERROR: REDDIT_CLIENT_SECRET environment variable not set")
+            return False
+        
+        debug_print(f"Using Reddit client ID: {client_id[:6]}...")
+        debug_print(f"Using Reddit client secret: {client_secret[:6]}...")
         
         reddit = praw.Reddit(
             client_id=client_id,
             client_secret=client_secret,
-            user_agent="tts-streamer/1.0 by DirtPuzzleheaded5521",
+            user_agent="tts-streamer/1.0 by YourUsername",
         )
+        
+        # Test the connection by making a simple request
+        reddit.user.me()
         
         debug_print("Reddit initialized successfully")
         return True
+        
     except Exception as e:
         debug_print(f"ERROR connecting to Reddit API: {e}")
+        debug_print(f"Error type: {type(e).__name__}")
+        
+        # Provide more specific error information
+        if "401" in str(e):
+            debug_print("Authentication failed - check your Reddit API credentials")
+        elif "403" in str(e):
+            debug_print("Access forbidden - your app may not have the right permissions")
+        
         return False
 
 def initialize_elevenlabs():
     try:
-        eleven_api_key = os.environ.get('ELEVENLABS_API_KEY', 'sk_328ed0b28661215a7331caa5029cfd0201a057920c654560')
-        debug_print(f"API Key starts with: {eleven_api_key[:10]}..." if eleven_api_key else "No API key found")
+        eleven_api_key = os.environ.get('ELEVENLABS_API_KEY')
+        
+        if not eleven_api_key:
+            debug_print("ERROR: ELEVENLABS_API_KEY environment variable not set")
+            return False
+            
+        debug_print(f"Using ElevenLabs API key: {eleven_api_key[:6]}...")
+        
         set_api_key(eleven_api_key)
-        
-        # Test the API with a simple call
-        test_audio = generate(
-            text="test",
-            voice="od84OdVweqzO3t6kKlWT",
-            model="eleven_monolingual_v1"
-        )
-        
-        debug_print("ElevenLabs initialized and tested successfully")
+        debug_print("ElevenLabs initialized successfully")
         return True
+        
     except Exception as e:
-        debug_print(f"ERROR connecting to ElevenLabs API: {str(e)}")
-        debug_print(f"Error type: {type(e).__name__}")
+        debug_print(f"ERROR connecting to ElevenLabs API: {e}")
         return False
 
 def clean_text(markdown: str) -> str:
@@ -156,15 +179,22 @@ def index():
 
 @app.route('/health')
 def health_check():
-    return jsonify({'status': 'healthy', 'reddit': reddit is not None})
+    return jsonify({
+        'status': 'healthy', 
+        'reddit_connected': reddit is not None,
+        'env_vars': {
+            'REDDIT_CLIENT_ID': os.environ.get('REDDIT_CLIENT_ID') is not None,
+            'REDDIT_CLIENT_SECRET': os.environ.get('REDDIT_CLIENT_SECRET') is not None,
+            'ELEVENLABS_API_KEY': os.environ.get('ELEVENLABS_API_KEY') is not None
+        }
+    })
 
 @app.route('/api/start_stream', methods=['POST'])
 def start_stream():
     global is_streaming, current_submission, comment_thread, seen_comments
     
-    # Check if Reddit is initialized
+    # Check if Reddit is connected
     if reddit is None:
-        debug_print("Reddit not initialized - cannot start stream")
         return jsonify({'error': 'Reddit API not connected. Check server logs.'}), 500
     
     data = request.json
@@ -180,9 +210,13 @@ def start_stream():
         if 'reddit.com' not in reddit_url:
             return jsonify({'error': 'Invalid Reddit URL'}), 400
         
-        debug_print(f"Attempting to load Reddit submission: {reddit_url}")
+        debug_print(f"Attempting to get submission from URL: {reddit_url}")
         current_submission = reddit.submission(url=reddit_url)
         current_submission.comments.replace_more(limit=0)
+        
+        # Test if we can access the submission
+        title = current_submission.title
+        debug_print(f"Successfully got submission: {title}")
         
         current_settings.update(data)
         seen_comments.clear()
@@ -191,19 +225,28 @@ def start_stream():
         comment_thread = threading.Thread(target=comment_monitor, daemon=True)
         comment_thread.start()
         
-        debug_print(f"Stream started successfully for: {current_submission.title[:50]}")
-        
         return jsonify({
             'success': True,
-            'title': current_submission.title[:100],
+            'title': title[:100],
             'subreddit': current_submission.subreddit.display_name,
             'author': str(current_submission.author) if current_submission.author else '[deleted]'
         })
         
     except Exception as e:
-        debug_print(f"ERROR starting stream: {str(e)}")
+        debug_print(f"ERROR starting stream: {e}")
         debug_print(f"Error type: {type(e).__name__}")
-        return jsonify({'error': f'Failed to start stream: {str(e)}'}), 500
+        
+        # Provide more specific error information
+        if "404" in str(e):
+            error_msg = "Reddit post not found. Check the URL."
+        elif "403" in str(e):
+            error_msg = "Access forbidden. The post may be private or deleted."
+        elif "401" in str(e):
+            error_msg = "Authentication failed. Check Reddit API credentials."
+        else:
+            error_msg = f'Failed to start stream: {str(e)}'
+            
+        return jsonify({'error': error_msg}), 500
 
 @app.route('/api/stop_stream', methods=['POST'])
 def stop_stream():
@@ -236,10 +279,23 @@ def test_audio():
     except Exception as e:
         return jsonify({'error': f'Audio test failed: {str(e)}'}), 500
 
+@app.route('/api/settings', methods=['POST'])
+def save_settings():
+    global current_settings
+    try:
+        data = request.json
+        current_settings.update(data)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': f'Failed to save settings: {str(e)}'}), 500
+
 @socketio.on('connect')
 def handle_connect():
     debug_print('Client connected')
-    emit('status', {'message': 'Connected to server'})
+    if reddit is None:
+        emit('error', {'message': 'Reddit API not connected. Check server configuration.'})
+    else:
+        emit('status', {'message': 'Connected to server'})
 
 @socketio.on('disconnect')
 def handle_disconnect():
@@ -248,15 +304,35 @@ def handle_disconnect():
 if __name__ == '__main__':
     print("🚀 Initializing Reddit TTS Web Application...")
     
-    if not initialize_reddit():
+    # Check environment variables first
+    print("📋 Checking environment variables...")
+    required_vars = ['REDDIT_CLIENT_ID', 'REDDIT_CLIENT_SECRET', 'ELEVENLABS_API_KEY']
+    missing_vars = []
+    
+    for var in required_vars:
+        if not os.environ.get(var):
+            missing_vars.append(var)
+            print(f"❌ {var} not set")
+        else:
+            print(f"✅ {var} is set")
+    
+    if missing_vars:
+        print(f"⚠️  Missing environment variables: {', '.join(missing_vars)}")
+        print("⚠️  The app will start but Reddit/ElevenLabs features may not work")
+    
+    reddit_success = initialize_reddit()
+    elevenlabs_success = initialize_elevenlabs()
+    
+    if not reddit_success:
         print("❌ Failed to initialize Reddit API")
-        exit(1)
-    
-    if not initialize_elevenlabs():
+    else:
+        print("✅ Reddit API initialized successfully")
+        
+    if not elevenlabs_success:
         print("❌ Failed to initialize ElevenLabs API")
-        exit(1)
+    else:
+        print("✅ ElevenLabs API initialized successfully")
     
-    print("✅ All APIs initialized successfully")
     print("🎧 Starting web server...")
     
     port = int(os.environ.get('PORT', 5000))
