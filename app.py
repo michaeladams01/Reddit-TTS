@@ -46,11 +46,21 @@ def initialize_reddit():
 def initialize_elevenlabs():
     try:
         eleven_api_key = os.environ.get('ELEVENLABS_API_KEY', 'sk_328ed0b28661215a7331caa5029cfd0201a057920c654560')
+        debug_print(f"API Key starts with: {eleven_api_key[:10]}..." if eleven_api_key else "No API key found")
         set_api_key(eleven_api_key)
-        debug_print("ElevenLabs initialized successfully")
+        
+        # Test the API with a simple call
+        test_audio = generate(
+            text="test",
+            voice="od84OdVweqzO3t6kKlWT",
+            model="eleven_monolingual_v1"
+        )
+        
+        debug_print("ElevenLabs initialized and tested successfully")
         return True
     except Exception as e:
-        debug_print(f"ERROR connecting to ElevenLabs API: {e}")
+        debug_print(f"ERROR connecting to ElevenLabs API: {str(e)}")
+        debug_print(f"Error type: {type(e).__name__}")
         return False
 
 def clean_text(markdown: str) -> str:
