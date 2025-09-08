@@ -162,6 +162,11 @@ def health_check():
 def start_stream():
     global is_streaming, current_submission, comment_thread, seen_comments
     
+    # Check if Reddit is initialized
+    if reddit is None:
+        debug_print("Reddit not initialized - cannot start stream")
+        return jsonify({'error': 'Reddit API not connected. Check server logs.'}), 500
+    
     data = request.json
     reddit_url = data.get('reddit_url', '')
     
@@ -175,6 +180,7 @@ def start_stream():
         if 'reddit.com' not in reddit_url:
             return jsonify({'error': 'Invalid Reddit URL'}), 400
         
+        debug_print(f"Attempting to load Reddit submission: {reddit_url}")
         current_submission = reddit.submission(url=reddit_url)
         current_submission.comments.replace_more(limit=0)
         
@@ -185,6 +191,8 @@ def start_stream():
         comment_thread = threading.Thread(target=comment_monitor, daemon=True)
         comment_thread.start()
         
+        debug_print(f"Stream started successfully for: {current_submission.title[:50]}")
+        
         return jsonify({
             'success': True,
             'title': current_submission.title[:100],
@@ -193,7 +201,8 @@ def start_stream():
         })
         
     except Exception as e:
-        debug_print(f"ERROR starting stream: {e}")
+        debug_print(f"ERROR starting stream: {str(e)}")
+        debug_print(f"Error type: {type(e).__name__}")
         return jsonify({'error': f'Failed to start stream: {str(e)}'}), 500
 
 @app.route('/api/stop_stream', methods=['POST'])
