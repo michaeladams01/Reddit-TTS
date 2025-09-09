@@ -50,8 +50,9 @@ def initialize_reddit():
             user_agent="tts-streamer/1.0 by YourUsername",
         )
         
-        # Test the connection by making a simple request
-        reddit.user.me()
+        # Test the connection by getting a basic subreddit
+        test_sub = reddit.subreddit('test').display_name
+        debug_print(f"Successfully accessed subreddit: {test_sub}")
         
         debug_print("Reddit initialized successfully")
         return True
@@ -125,48 +126,81 @@ def comment_monitor():
     
     try:
         last_comment_time = 0
-        min_interval = 3
+        min_interval = 10  # Increased from 3 to 10 seconds
+        max_comments_per_hour = 20  # Limit comments processed
+        comment_count = 0
+        start_time = time.time()
         
-        for comment in reddit.subreddit(current_submission.subreddit.display_name).stream.comments(skip_existing=True):
-            if not is_streaming:
-                break
-            
-            current_time = time.time()
-            if current_time - last_comment_time < min_interval:
-                continue
+        # Use a more memory-efficient approach - check for new comments periodically
+        while is_streaming:
+            try:
+                current_submission.comments.replace_more(limit=0)
+                new_comments = []
                 
-            if comment.link_id.split("_")[1] != submission_id:
-                continue
-
-            if comment.body in ['[deleted]', '[removed]', '']:
-                continue
-
-            if comment.id not in seen_comments and len(comment.body.strip()) > 5:
-                seen_comments.add(comment.id)
-                last_comment_time = current_time
+                # Get recent comments (limit to last 10)
+                for comment in list(current_submission.comments)[-10:]:
+                    if comment.id not in seen_comments:
+                        new_comments.append(comment)
                 
-                comment_data = {
-                    'id': comment.id,
-                    'author': str(comment.author) if comment.author else '[deleted]',
-                    'body': comment.body[:500],
-                    'timestamp': time.time(),
-                    'permalink': comment.permalink
-                }
+                # Process new comments
+                for comment in new_comments:
+                    if not is_streaming:
+                        break
+                        
+                    # Check rate limits
+                    if comment_count >= max_comments_per_hour:
+                        if time.time() - start_time < 3600:  # Less than an hour
+                            time.sleep(60)  # Wait 1 minute
+                            continue
+                        else:
+                            comment_count = 0
+                            start_time = time.time()
+                    
+                    current_time = time.time()
+                    if current_time - last_comment_time < min_interval:
+                        continue
+                    
+                    if comment.body in ['[deleted]', '[removed]', '']:
+                        continue
+                        
+                    if len(comment.body.strip()) > 5:
+                        seen_comments.add(comment.id)
+                        last_comment_time = current_time
+                        comment_count += 1
+                        
+                        comment_data = {
+                            'id': comment.id,
+                            'author': str(comment.author) if comment.author else '[deleted]',
+                            'body': comment.body[:200],  # Reduced from 500
+                            'timestamp': time.time(),
+                            'permalink': comment.permalink
+                        }
+                        
+                        debug_print(f"New comment by {comment_data['author']}: {comment_data['body'][:50]}")
+                        socketio.emit('new_comment', comment_data)
+                        
+                        # Simplified audio generation
+                        try:
+                            audio_data = speak_text(comment.body[:100], current_settings['voice_id'])  # Limit text length
+                            if audio_data:
+                                audio_b64 = base64.b64encode(audio_data).decode('utf-8')
+                                socketio.emit('play_audio', {
+                                    'audio': audio_b64,
+                                    'comment_id': comment.id,
+                                    'text': comment.body[:50]
+                                })
+                        except Exception as audio_error:
+                            debug_print(f"Audio generation failed: {audio_error}")
                 
-                debug_print(f"New comment by {comment_data['author']}: {comment_data['body'][:80]}")
-                socketio.emit('new_comment', comment_data)
+                # Sleep between checks to reduce resource usage
+                time.sleep(30)  # Check for new comments every 30 seconds
                 
-                audio_data = speak_text(comment.body, current_settings['voice_id'])
-                if audio_data:
-                    audio_b64 = base64.b64encode(audio_data).decode('utf-8')
-                    socketio.emit('play_audio', {
-                        'audio': audio_b64,
-                        'comment_id': comment.id,
-                        'text': comment.body[:100]
-                    })
+            except Exception as e:
+                debug_print(f"Error checking comments: {e}")
+                time.sleep(60)  # Wait longer if there's an error
                 
     except Exception as e:
-        debug_print(f"ERROR in comment stream: {e}")
+        debug_print(f"ERROR in comment monitor: {e}")
         socketio.emit('error', {'message': f'Comment stream error: {str(e)}'})
 
 @app.route('/')
